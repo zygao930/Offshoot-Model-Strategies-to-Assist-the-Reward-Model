@@ -5,7 +5,7 @@ import re
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import json
 
-class MetaCoTGenerator:
+class VerifyCoTGenerator:
     def __init__(self, model_path):
         self.model = AutoModelForCausalLM.from_pretrained(
             model_path, 
@@ -14,20 +14,23 @@ class MetaCoTGenerator:
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         
-        # Template for verifying the generated answer
-        self.verification_template = """Verify if the answer meets all requirements:
-Input: {input_str}
-Generated attempt: {attempt}
-Verification steps:
-1. Does each character match the last letter of corresponding input word?
-2. Are all letters uppercase with no special characters?
-3. Is the length exactly {expected_len}?
-Corrected answer:"""
-
+    # 1.very important. 
+    # create primary prompt first, 
+    # add STRONG ATTENTION TO THE LAST LETTER WITH REGULAR EXPRESSION, 
+    # than clean and standardlize it.
+    def create_primary_prompt(self, names):
+        return f"""Follow these steps:
+1. Extract last letters from: {' '.join(names)}{' | '.join([f'{n}→{n[-1].upper()}' for n in names])}
+2. Convert to uppercase and remove non-alphabetic characters
+3. Concatenate results maintaining word order
+4. Ensure length matches {len(names)} characters
+Final answer (uppercase letters only):"""
+    
+    # 2.Generate initial_answers 
     def generate_initial_answer(self, input_names):
 
         # Create the primary prompt for the model
-        primary_prompt = self._create_primary_prompt(input_names)
+        primary_prompt = self.create_primary_prompt(input_names)
         # Tokenize the prompt and move to the same device as the model
         inputs = self.tokenizer(primary_prompt, return_tensors="pt").to(self.model.device)
         
@@ -38,35 +41,33 @@ Corrected answer:"""
             do_sample=True,  # Enable sampling for diverse outputs
             temperature=0.2,  # Control the randomness of predictions by scaling the logits
             top_p=0.85,  # Use nucleus sampling (top-p sampling)
-            num_return_sequences=10,  # Generate 10 different sequences
-            bad_words_ids=[[self.tokenizer.encode("<")[0]]]  # Prevent the model from generating certain tokens
+            num_return_sequences=10,  # Generate 10 different sequences, also equals to 10 candidates
+            # used to generate a lot of html code...bad code
+            # Prevent the model from generating certain tokens
+            bad_words_ids=[[self.tokenizer.encode("<")[0]]] 
         )
         
         # Decode the generated sequences into human-readable text
         return [self.tokenizer.decode(o, skip_special_tokens=True) for o in outputs]
 
-    # 1.very important. 
-    # create primary prompt first, 
-    # add STRONG ATTENTION TO THE LAST LETTER, 
-    # than clean and standardlize it.
-    def _create_primary_prompt(self, names):
-        return f"""Follow these steps:
-1. Extract last letters from: {' '.join(names)}{' | '.join([f'{n}→{n[-1].upper()}' for n in names])}
-2. Convert to uppercase and remove non-alphabetic characters
-3. Concatenate results maintaining word order
-4. Ensure length matches {len(names)} characters
-Final answer (uppercase letters only):"""
-    
-    # 2.REMOVE THE SYMBOLS->KEEP ALPHABETIC->STANDARDLIZE
+
+    # 3.Verification and correction. 
+    #  REMOVE THE SYMBOLS->KEEP ALPHABETIC->STANDARDLIZE
     def validate_and_correct(self, attempt, input_names):
-        expected_len = len(input_names)
-        # Step1: Clean the attempt by removing non-alphabetic characters and ensuring uppercase
-        cleaned = re.sub(r'[^A-Z]', '', attempt.upper())[:expected_len]
-        # Enforce alignment. Pad with underscores if necessary
-        cleaned = cleaned.ljust(expected_len, '_')  
-        
-        # Step2: Format the verification prompt with the input, attempt, and expected length
-        verification_prompt = self.verification_template.format(
+        expected_len=len(input_names)
+
+        # Step1: ADD A VERIFICATION 
+        verification_template = """Verify if the answer meets all requirements:
+Input: {input_str}
+Generated attempt: {attempt}
+Verification steps:
+1. Does each character match the last letter of corresponding input word?
+2. Are all letters uppercase with no special characters?
+3. Is the length exactly {expected_len}?
+Corrected answer:"""
+
+        # Format the verification prompt with the input, attempt, and expected length
+        verification_prompt = verification_template.format(
             input_str=' '.join(input_names),
             attempt=attempt,
             expected_len=expected_len
@@ -74,14 +75,14 @@ Final answer (uppercase letters only):"""
         
         inputs = self.tokenizer(verification_prompt, return_tensors="pt").to(self.model.device)
 
-        # Step3: Generate a correction based on the verification prompt
+        # Step2: Generate a correction based on the verification prompt
         # Enforce the model to generate the answers that meet the requirement
         correction = self.model.generate(
             **inputs,
             max_new_tokens=expected_len+2,  # Limit the number of new tokens
 
             # Extremely important, 
-            # greedy decoding, disable sampling, generate deterministic output
+            # greedy decoding, disable sampling, generate deterministic token with the highest probablity
             # that meet the requirement of verification
             do_sample=False  
         )
@@ -90,9 +91,8 @@ Final answer (uppercase letters only):"""
         final_answer = self.tokenizer.decode(correction[0], skip_special_tokens=True)
         return re.sub(r'[^A-Z]', '', final_answer.split("Corrected answer:")[-1].strip())
 
-    #3.Generate the best answer using Meta-CoT generation with a validation loop.
-    # n_candidate can be increased to 32 as the paper said
-    def get_best_answer(self, input_names, num_candidates=5):
+    #4.Generate the best answer using Verify-CoT generation with a validation loop.
+    def get_best_answer(self, input_names):
 
         # Generate initial candidate answers
         candidates = self.generate_initial_answer(input_names)
@@ -108,7 +108,7 @@ Final answer (uppercase letters only):"""
 
 class TrainingDataGenerator:
     def __init__(self, model_path):
-        self.generator = MetaCoTGenerator(model_path)
+        self.generator = VerifyCoTGenerator(model_path)
     
     def create_dataset(self, name_list, config):
         # Generate multi-verification training data.
@@ -158,7 +158,7 @@ class TrainingDataGenerator:
         ]
         
         # Compare each character in the attempt with the expected character
-        # Very interesting point here "✓✗" is more distinguisble 
+        # Very interesting point here "✓✗" is more distinguisble, Unicode characters
         # right/wrong can also contains ethics judgment, while "✓✗" focuses more on correct/incorrect, but with less space
         for idx, (name, char) in enumerate(zip(names, attempt)):
             expected_char = name[-1].upper()
@@ -178,8 +178,8 @@ if __name__ == "__main__":
     
     train_config = {
         'lengths': [2, 3, 4],  
-        'n_samples': 50,  
-        'n_attempts': 20  
+        'n_samples': 5,  
+        'n_attempts': 5  
     }
     
     last_names = pd.read_csv("/root/dl/top_1000_last_names.csv")['Name'].tolist()
