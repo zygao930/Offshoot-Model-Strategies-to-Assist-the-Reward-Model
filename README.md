@@ -3,6 +3,10 @@
 
 ## ```Dataset ``` ##
 
+### Standard-format-preference-dataset ###
+
+https://huggingface.co/collections/RLHFlow/standard-format-preference-dataset-662eec0252e194d5d40c252a
+
 ### GradeSchoolMath ###
 
 dataset:https://github.com/openai/grade-school-math/tree/master/grade_school_math/data
