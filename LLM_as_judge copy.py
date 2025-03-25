@@ -113,34 +113,24 @@ class LLMEvaluator:
 
 def load_dataset(file_path, sample_size=100):
     """Load dataset from JSON or Parquet with validation"""
-    try:
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Dataset file not found: {file_path}")
 
-        if file_path.endswith('.json'):
-            with open(file_path) as f:
-                data = json.load(f)
-        elif file_path.endswith('.parquet'):
-            df = pd.read_parquet(file_path)
-            data = df.to_dict('records')
-        else:
-            raise ValueError("Unsupported file format. Use .json or .parquet")
+    if file_path.endswith('.json'):
+        with open(file_path) as f:
+            data = json.load(f)
+    elif file_path.endswith('.parquet'):
+        df = pd.read_parquet(file_path)
+        data = df.to_dict('records')
+    else:
+        raise ValueError("Unsupported file format. Use .json or .parquet")
 
-        if not data:
-            raise ValueError("Dataset is empty")
+    # Validate required columns
+    sample = random.sample(data, min(sample_size, len(data)))
+    for item in sample:
+        if 'prompt' not in item or 'chosen' not in item or 'rejected' not in item:
+            raise ValueError("Dataset missing required columns (prompt, chosen, rejected)")
 
-        # Validate required columns
-        sample = random.sample(data, min(sample_size, len(data)))
-        for item in sample:
-            if 'prompt' not in item or 'chosen' not in item or 'rejected' not in item:
-                raise ValueError("Dataset missing required columns (prompt, chosen, rejected)")
-
-        print(f"\n{Fore.GREEN}Loaded {len(sample)}/{len(data)} items{Style.RESET_ALL}")
-        return sample
-
-    except Exception as e:
-        print(f"{Fore.RED}LOAD ERROR:{Style.RESET_ALL} {str(e)}")
-        return []
+    print(f"\n{Fore.GREEN}Loaded {len(sample)}/{len(data)} items{Style.RESET_ALL}")
+    return sample
 
 def run_evaluation(dataset, evaluator, method):
     """Run evaluation with comprehensive tracking"""
@@ -230,7 +220,7 @@ if __name__ == "__main__":
     CONFIG = {
         "api_key": ,
         "base_url": "https://api.deepseek.com/v1",
-        "dataset_path": "dataset/train-00000-of-00001-2a1df75c6bce91ab.parquet",  # Update this path
+        "dataset_path": "dataset/train-00000-of-00001-2a1df75c6bce91ab.parquet",  
         "sample_size": 100,
         "methods": ['baseline', 'cot', 'critic', 'sop'],
         "model": "deepseek-chat"
