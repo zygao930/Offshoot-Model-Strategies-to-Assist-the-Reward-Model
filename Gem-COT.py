@@ -17,15 +17,19 @@ class GenRM:
         self.model = "deepseek-chat"
         self.confidence_threshold = confidence_threshold
         self.verification_instructions = """
-        Let's verify step by step:
-            1. Fact Check: Verify claims, disqualify if false
-            2. Semantic Relevance: Check prompt coverage
-            3. Style Consistency: Evaluate tone match
-            
-            Final Decision:
-            - Output ONLY [[Yes]] or [[No]]
+         Let's verify the answer step by step using Generative Evidence-based Chain-of-Thought (GEM-CoT):
+
+         1. Correctness: Verify all calculations step-by-step
+         2. Precision: Check for exact mathematical formulations
+         3. Logical Flow: Ensure proper derivation sequence
+         4. No Ambiguity: Reject any unclear notations
+
+            Final Decision Rules:
+         - MUST respond with exactly "[[✅]]" if ALL checks pass
+         - MUST respond with exactly "[[❌]]" if ANY check fails
+         - DO NOT include any other text, symbols, or explanations
          """
-    
+            
     def load_dataset(self, file_path, sample_size=10):
         """Load dataset from JSON or Parquet with validation"""
         if file_path.endswith('.json'):
@@ -58,37 +62,46 @@ class GenRM:
       response = self.client.chat.completions.create(
          model=self.model,
          messages=[{"role": "user", "content": verification_prompt}],
-         temperature=0.7,
-         max_tokens=300,
+         temperature=0.3,
+         max_tokens=3,
          logprobs=True,
          top_logprobs=5
       )
       
-      # Debug: Print raw logprobs
+      # # Debug: Print raw logprobs
       # print("\nRaw Logprobs Structure:")
       # for i, token in enumerate(response.choices[0].logprobs.content):
       #    print(f"Token {i}: {token.token} (logprob={token.logprob})")
       #    for top in token.top_logprobs:
       #          print(f"  Top: {top.token} (logprob={top.logprob})")
 
-      # Extract probabilities for [[Yes]] and [[No]]
-      yes_logprobs = []
-      no_logprobs = []
-      
-      for token in response.choices[0].logprobs.content:
-         for top in token.top_logprobs:
-               if 'yes' in top.token.lower():
-                  yes_logprobs.append(top.logprob)
-               elif 'no' in top.token.lower():
-                  no_logprobs.append(top.logprob)
-      
-      # Convert logprobs to probabilities
-      if yes_logprobs and no_logprobs:
-         max_yes = max(yes_logprobs)
-         max_no = max(no_logprobs)
-         p_yes = np.exp(max_yes) / (np.exp(max_yes) + np.exp(max_no))
+      # Check for complete verdict in the response content first
+      full_response = response.choices[0].message.content.strip()
+      if full_response == "[[✅]]":
+         p_yes = 1.0
+      elif full_response == "[[❌]]":
+         p_yes = 0.0
       else:
-         p_yes = 0.0  # Default to rejection if no verdict found
+         # If full response check fails, fall back to token analysis
+         has_check = False
+         has_cross = False
+         
+         for token in response.choices[0].logprobs.content:
+               for top in token.top_logprobs:
+                  if '✅' in top.token:
+                     has_check = True
+                  elif '❌' in top.token:
+                     has_cross = True
+         
+         # Determine probability based on what we found
+         if has_check and not has_cross:
+               p_yes = 1.0
+         elif has_cross and not has_check:
+               p_yes = 0.0
+         else:
+               # If we get here, the response was ambiguous
+               # print(f"⚠️ Warning: Ambiguous verification response: '{full_response}'")
+               p_yes = 0.0  # Default to rejection if unclear
 
       print(f"\nCalculated P(Yes): {p_yes:.2%}")
       return p_yes, response.choices[0].message.content
@@ -104,7 +117,7 @@ class GenRM:
         all_rationales = [r[1] for r in results]
         
         avg_p_yes = np.mean(all_p_yes)
-        final_verdict = avg_p_yes > self.confidence_threshold
+        final_verdict = avg_p_yes >= self.confidence_threshold
         
         return final_verdict, all_rationales, avg_p_yes
 
@@ -158,6 +171,11 @@ class GenRM:
 
     def save_results(self, results):
       """Structured results saving with metadata"""
+      def convert_bools(obj):
+         if isinstance(obj, bool):
+               return bool(obj)  # Ensures numpy.bool_ gets converted
+         raise TypeError
+
       timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
       output = {
          "metadata": {
@@ -165,20 +183,24 @@ class GenRM:
                "model": self.model,
                "confidence_threshold": self.confidence_threshold,
                "total_samples": len(results),
-               "passed_samples": sum(1 for r in results if bool(r['passed'])),  # Convert NumPy bool
+               "passed_samples": sum(1 for r in results if bool(r['passed'])),
                "accuracy": float(sum(1 for r in results if bool(r['passed']))) / len(results),
                "average_chosen_score": float(np.mean([r['chosen_score'] for r in results])),
                "average_rejected_score": float(np.mean([r['rejected_score'] for r in results]))
          },
          "results": [
-               {**r, "passed": bool(r["passed"])}  # Ensure boolean conversion for each result
+               {
+                  **r,
+                  "passed": bool(r["passed"]),
+                  "verdict": bool(r.get("verdict", False))  # Add this line
+               }
                for r in results
          ]
       }
       
-      filename = f"genrm_results_{timestamp}.json"
+      filename = f"output/genrm_results_{timestamp}.json"
       with open(filename, 'w') as f:
-         json.dump(output, f, indent=2)
+         json.dump(output, f, indent=2, default=convert_bools)
       
       print(f"\n{Fore.GREEN}Results saved to:{Style.RESET_ALL} {filename}")
       return filename
@@ -190,7 +212,9 @@ if __name__ == "__main__":
     
     # Load dataset
     dataset = genrm.load_dataset(
-        file_path="dataset/total_dataset.json",  
+        file_path="dataset/math_filtered.json",  
+      #   file_path="dataset/total_dataset.json",  
+      #   file_path="dataset/safety-response_filtered.json",  
         sample_size=100
     )
     
@@ -198,7 +222,7 @@ if __name__ == "__main__":
     accuracy, results = genrm.evaluate_dataset(
         dataset, 
         sample_size=10, 
-        votes=10
+        votes=5
     )
 
     # Save structured results
