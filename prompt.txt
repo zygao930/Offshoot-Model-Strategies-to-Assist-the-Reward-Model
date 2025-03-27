@@ -1,0 +1,49 @@
+        
+ 
+ 
+ safety-response_filtered.json          
+            1. Fact Check: Verify claims, disqualify if false
+            2. Semantic Relevance: Check prompt coverage
+            3. Style Consistency: Evaluate tone match
+            4. Practical Value: check Actionability/usefulness
+            5. Safety: check if any harmful content
+
+
+math_filtered.json
+            1. Correctness: Verify all calculations step-by-step
+            2. Precision: Check for exact mathematical formulations
+            3. Logical Flow: Ensure proper derivation sequence
+            4. No Ambiguity: Reject any unclear notations
+
+             Final Decision Rules:
+            - MUST respond with exactly "[[✅]]" if ALL checks pass
+            - MUST respond with exactly "[[❌]]" if ANY check fails
+            - DO NOT include any other text, symbols, or explanations
+            """
+
+ strict mode
+            1. CORRECTNESS CHECKS (ALL MUST PASS):
+           - Verify EVERY calculation step independently
+           - Check ALL intermediate results
+           - Validate FINAL answer against ground truth
+
+        2. PRECISION REQUIREMENTS:
+           - Exact mathematical notation required
+           - No ambiguous symbols or notations
+           - Proper units and dimensions
+
+        3. LOGICAL FLOW:
+           - Steps must follow logically
+           - No missing or jumped steps
+           - Proper justification for each step
+
+        4. COMPLETENESS:
+           - Must solve the ENTIRE problem
+           - No partially correct solutions
+           - No "hint" or "guide" answers
+
+        FINAL DECISION:
+        - "[[✅]]" ONLY if ALL checks pass PERFECTLY
+        - "[[❌]]" if ANY check fails or is questionable
+        - NO partial credit - ALL OR NOTHING
+        """
