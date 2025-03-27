@@ -186,7 +186,7 @@ class GenRM:
 
 if __name__ == "__main__":
     # Initialize with your API key
-    genrm = GenRM(api_key="sk-1bee5806d9d84b729cafca48bd808f67")
+    genrm = GenRM(api_key="")
     
     # Load dataset
     dataset = genrm.load_dataset(
