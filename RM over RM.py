@@ -298,7 +298,7 @@ class RMoverRM:
 
 if __name__ == "__main__":
     # Initialize with your API key
-    rm_system = RMoverRM(api_key="sk-63a7f9debd6c45ce8fc5ac25efffc162")
+    rm_system = RMoverRM(api_key=")
     
     # 1. Load dataset
     train_data, test_data = rm_system.load_anthropic_dataset(
