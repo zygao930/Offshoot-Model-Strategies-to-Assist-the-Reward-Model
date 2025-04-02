@@ -164,7 +164,7 @@ class GenRMCoT:
 if __name__ == "__main__":
     # Initialize with your API key
     genrm = GenRMCoT(
-        api_key="sk-63a7f9debd6c45ce8fc5ac25efffc162",
+        api_key="",
         num_votes=32  # Number of CoT samples for majority voting
     )
     
